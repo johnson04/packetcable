@@ -4,6 +4,8 @@ import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -12,18 +14,18 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.opendaylight.controller.md.sal.binding.api.DataBroker;
 import org.opendaylight.controller.md.sal.binding.api.DataChangeListener;
+import org.opendaylight.controller.md.sal.binding.api.ReadOnlyTransaction;
+import org.opendaylight.controller.md.sal.binding.api.WriteTransaction;
 import org.opendaylight.controller.md.sal.common.api.data.AsyncDataBroker.DataChangeScope;
 import org.opendaylight.controller.md.sal.common.api.data.AsyncDataChangeEvent;
 import org.opendaylight.controller.md.sal.common.api.data.LogicalDatastoreType;
+import org.opendaylight.controller.md.sal.common.api.data.ReadFailedException;
 import org.opendaylight.controller.packetcable.provider.processors.PCMMDataProcessor;
 import org.opendaylight.controller.sal.binding.api.BindingAwareBroker.ConsumerContext;
 import org.opendaylight.controller.sal.binding.api.BindingAwareBroker.ProviderContext;
 import org.opendaylight.controller.sal.binding.api.BindingAwareBroker.RoutedRpcRegistration;
 import org.opendaylight.controller.sal.binding.api.BindingAwareProvider;
 import org.opendaylight.controller.sal.binding.api.NotificationProviderService;
-import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev100924.Ipv4Address;
-import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev100924.Ipv6Address;
-import org.opendaylight.yang.gen.v1.urn.ietf.params.xml.ns.yang.ietf.inet.types.rev100924.PortNumber;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.action.types.rev131112.action.list.Action;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.AddFlowInput;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.AddFlowOutput;
@@ -35,30 +37,24 @@ import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.Upda
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.UpdateFlowOutput;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.flow.update.OriginalFlow;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.service.rev130819.flow.update.UpdatedFlow;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.TrafficProfileBestEffortAttributes;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.TrafficProfileDocsisServiceClassNameAttributes;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.TrafficProfileFlowspecAttributes;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.BestEffortCase;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.DocsisServiceClassNameCase;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140808.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.FlowspecCase;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.TrafficProfileBestEffortAttributes;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.TrafficProfileDocsisServiceClassNameAttributes;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.TrafficProfileFlowspecAttributes;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.BestEffortCase;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.DocsisServiceClassNameCase;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.traffic.profile.rev140908.add.flow.input.instructions.instruction.instruction.apply.actions._case.apply.actions.action.action.FlowspecCase;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.transaction.rev131103.TransactionId;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.flow.Match;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.instruction.instruction.ApplyActionsCase;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.instruction.list.Instruction;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.NodeRef;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.Nodes;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.nodes.Node;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140120.CmtsCapableNode;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140120.nodes.node.CmtsNode;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.SubscriberIdRpcAddFlow;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.TcpMatchRangesAttributes;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.TcpMatchRangesRpcAddFlow;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.UdpMatchRangesAttributes;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.UdpMatchRangesRpcAddFlow;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.UdpMatchRangesRpcRemoveFlow;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.UdpMatchRangesRpcUpdateFlowOriginal;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.UdpMatchRangesRpcUpdateFlowUpdated;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.tcp.match.ranges.attributes.TcpMatchRanges;
-import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140120.udp.match.ranges.attributes.UpdMatchRanges;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140909.CmtsCapableNode;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140909.nodes.node.CmtsNode;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140909.UdpMatchRangesRpcRemoveFlow;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140909.UdpMatchRangesRpcUpdateFlowOriginal;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140909.UdpMatchRangesRpcUpdateFlowUpdated;
 import org.opendaylight.yangtools.concepts.CompositeObjectRegistration;
 import org.opendaylight.yangtools.concepts.CompositeObjectRegistration.CompositeObjectRegistrationBuilder;
 import org.opendaylight.yangtools.concepts.ListenerRegistration;
@@ -68,15 +64,17 @@ import org.opendaylight.yangtools.yang.binding.RpcService;
 import org.opendaylight.yangtools.yang.common.RpcResult;
 import org.opendaylight.yangtools.yang.common.RpcResultBuilder;
 import org.pcmm.gates.IClassifier;
-import org.pcmm.gates.IExtendedClassifier;
 import org.pcmm.gates.ITrafficProfile;
-import org.pcmm.gates.impl.ExtendedClassifier;
 import org.pcmm.rcd.IPCMMPolicyServer;
 import org.pcmm.rcd.IPCMMPolicyServer.IPSCMTSClient;
 import org.pcmm.rcd.impl.PCMMPolicyServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.google.common.base.Optional;
+import com.google.common.collect.Lists;
+import com.google.common.util.concurrent.CheckedFuture;
+import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 
 @SuppressWarnings("unused")
@@ -97,13 +95,15 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 	private NotificationProviderService notificationService;
 	private DataBroker dataBroker;
 	private ListenerRegistration<DataChangeListener> listenerRegistration;
+	private List<InstanceIdentifier<?>> cmtsInstances;
 	private PCMMDataProcessor pcmmDataProcessor;
 	private IPCMMPolicyServer policyServer;
 
 	public OpendaylightPacketcableProvider() {
 		executor = Executors.newCachedThreadPool();
+		cmtsInstances = Lists.newArrayList();
 		pcmmDataProcessor = new PCMMDataProcessor();
-		policyServer=new PCMMPolicyServer();
+		policyServer = new PCMMPolicyServer();
 		policyServer.startServer();
 	}
 
@@ -121,24 +121,23 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 	@Override
 	public void close() throws ExecutionException, InterruptedException {
 		executor.shutdown();
-		// if (dataProvider != null) {
-		// for (Iterator<InstanceIdentifier<CmtsInstance>> iter =
-		// cmtsInstances.iterator(); iter.hasNext();) {
-		// WriteTransaction tx = dataProvider.newWriteOnlyTransaction();
-		// tx.delete(LogicalDatastoreType.OPERATIONAL, iter.next());
-		// Futures.addCallback(tx.submit(), new FutureCallback<Void>() {
-		// @Override
-		// public void onSuccess(final Void result) {
-		// logger.debug("Delete commit result: " + result);
-		// }
-		//
-		// @Override
-		// public void onFailure(final Throwable t) {
-		// logger.error("Delete operation failed", t);
-		// }
-		// });
-		// }
-		// }
+		if (dataProvider != null) {
+			for (Iterator<InstanceIdentifier<?>> iter = cmtsInstances.iterator(); iter.hasNext();) {
+				WriteTransaction tx = dataProvider.newWriteOnlyTransaction();
+				tx.delete(LogicalDatastoreType.OPERATIONAL, iter.next());
+				Futures.addCallback(tx.submit(), new FutureCallback<Void>() {
+					@Override
+					public void onSuccess(final Void result) {
+						logger.debug("Delete commit result: " + result);
+					}
+
+					@Override
+					public void onFailure(final Throwable t) {
+						logger.error("Delete operation failed", t);
+					}
+				});
+			}
+		}
 	}
 
 	/**
@@ -153,9 +152,9 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 	@Override
 	public Future<RpcResult<AddFlowOutput>> addFlow(AddFlowInput input) {
 		Match match = input.getMatch();
-		//XXX this wrong fix it  
-		CmtsNode cmts = (CmtsNode) input.getNode();
-		///end wrong
+		CmtsNode cmts = getCmtsNode(input);
+		if (cmts != null)
+			cmtsInstances.add(input.getNode().getValue());
 		IClassifier classifier = buildClassifier(match);
 		ITrafficProfile trafficProfie = null;
 		for (Instruction i : input.getInstructions().getInstruction()) {
@@ -164,7 +163,8 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 				for (Action a : aac.getApplyActions().getAction()) {
 					if (a.getAction() instanceof FlowspecCase) {
 						// not implemented
-						// trafficProfie = buildTrafficProfile(((FlowspecCase) a.getAction()).getFlowspec());
+						// trafficProfie = buildTrafficProfile(((FlowspecCase)
+						// a.getAction()).getFlowspec());
 					} else if (a.getAction() instanceof BestEffortCase) {
 						trafficProfie = buildTrafficProfile(((BestEffortCase) a.getAction()).getBestEffort());
 						break;
@@ -175,22 +175,44 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 				}
 			}
 		}
-		TransactionId transactionId=null;
+		TransactionId transactionId = null;
 		try {
 			IPSCMTSClient requestCMTSConnection = policyServer.requestCMTSConnection(InetAddress.getByName(cmts.getAddress().getIpv4Address().getValue()));
-			transactionId=new TransactionId(new BigInteger(String.valueOf(requestCMTSConnection.getTransactionId())));
+			transactionId = new TransactionId(new BigInteger(String.valueOf(requestCMTSConnection.getTransactionId())));
 		} catch (UnknownHostException e) {
 			e.printStackTrace();
 		}
-		if(transactionId==null)
-		{
-			return Futures.immediateFuture(RpcResultBuilder.<AddFlowOutput>failed().build());
+		if (transactionId == null) {
+			return Futures.immediateFuture(RpcResultBuilder.<AddFlowOutput> failed().build());
 		}
-		return Futures.immediateFuture(
-				RpcResultBuilder.success(
-						new AddFlowOutputBuilder().setTransactionId(transactionId).build()
-						).build()
-						);
+		return Futures.immediateFuture(RpcResultBuilder.success(new AddFlowOutputBuilder().setTransactionId(transactionId).build()).build());
+	}
+
+	/**
+	 * return the CmtsNode
+	 * 
+	 * @param input
+	 *            AddFlowinput
+	 * @return the cmts node
+	 */
+	@SuppressWarnings("unchecked")
+	protected CmtsNode getCmtsNode(AddFlowInput input) {
+		NodeRef nodeRef = input.getNode();
+		InstanceIdentifier<Node> instanceIdentifier = (InstanceIdentifier<Node>) nodeRef.getValue();
+		ReadOnlyTransaction rtransaction = dataBroker.newReadOnlyTransaction();
+		CheckedFuture<Optional<Node>, ReadFailedException> value = rtransaction.read(LogicalDatastoreType.CONFIGURATION, instanceIdentifier);
+		rtransaction.close();
+		Optional<Node> opt = null;
+		try {
+			opt = value.get();
+		} catch (Exception e) {
+			logger.error(e.getMessage());
+			return null;
+		}
+		Node node = opt.get();
+		CmtsCapableNode cmts = node.getAugmentation(CmtsCapableNode.class);
+		CmtsNode cmtsNode = cmts.getCmtsNode();
+		return cmtsNode;
 	}
 
 	@Override
