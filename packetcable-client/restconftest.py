@@ -423,7 +423,8 @@ class CableflowTests(object):
 			if content_type == "xml":
                             pprint (self.flows[fn], width=4)
 			else:
-                            # pprint (self.flows[filename], width=4)
+			    #print fn
+                            #pprint (self.flows[fn], width=4)
                             json.dumps(json.loads(data), indent=4)
 
     def flows_print(self):
