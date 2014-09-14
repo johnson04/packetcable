@@ -1,8 +1,5 @@
 package org.opendaylight.controller.packetcable.provider;
 
-import java.math.BigInteger;
-import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
@@ -47,9 +44,16 @@ import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.transaction.rev131103.
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.flow.Match;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.instruction.instruction.ApplyActionsCase;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.flow.types.rev131026.instruction.list.Instruction;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.NodeContextRef;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.NodeRef;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.Nodes;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.inventory.rev130819.nodes.Node;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsAdded;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsAddedBuilder;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsRemoved;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsRemovedBuilder;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsUpdated;
+import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.broker.rev140909.CmtsUpdatedBuilder;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140909.CmtsCapableNode;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.node.cmts.rev140909.nodes.node.CmtsNode;
 import org.opendaylight.yang.gen.v1.urn.opendaylight.packetcable.match.types.rev140909.UdpMatchRangesRpcRemoveFlow;
@@ -65,9 +69,6 @@ import org.opendaylight.yangtools.yang.common.RpcResult;
 import org.opendaylight.yangtools.yang.common.RpcResultBuilder;
 import org.pcmm.gates.IClassifier;
 import org.pcmm.gates.ITrafficProfile;
-import org.pcmm.rcd.IPCMMPolicyServer;
-import org.pcmm.rcd.IPCMMPolicyServer.IPSCMTSClient;
-import org.pcmm.rcd.impl.PCMMPolicyServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,14 +98,11 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 	private ListenerRegistration<DataChangeListener> listenerRegistration;
 	private List<InstanceIdentifier<?>> cmtsInstances;
 	private PCMMDataProcessor pcmmDataProcessor;
-	private IPCMMPolicyServer policyServer;
 
 	public OpendaylightPacketcableProvider() {
 		executor = Executors.newCachedThreadPool();
 		cmtsInstances = Lists.newArrayList();
 		pcmmDataProcessor = new PCMMDataProcessor();
-		policyServer = new PCMMPolicyServer();
-		policyServer.startServer();
 	}
 
 	public void setNotificationProvider(final NotificationProviderService salService) {
@@ -149,6 +147,21 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 		logger.debug("OpendaylightPacketcableProvider.onDataChanged() :" + dataObject);
 	}
 
+	public void notifyConsumerOnCmtsAdd(CmtsNode input, TransactionId transactionId) {
+		CmtsAdded cmtsRemoved = new CmtsAddedBuilder().setAddress(input.getAddress()).setPort(input.getPort()).setTransactionId(transactionId).build();
+		notificationProvider.publish(cmtsRemoved);
+	}
+
+	public void notifyConsumerOnCmtsRemove(CmtsNode input, TransactionId transactionId) {
+		CmtsRemoved cmtsRemoved = new CmtsRemovedBuilder().setAddress(input.getAddress()).setPort(input.getPort()).setTransactionId(transactionId).build();
+		notificationProvider.publish(cmtsRemoved);
+	}
+
+	public void notifyConsumerOnCmtsUpdate(CmtsNode input, TransactionId transactionId) {
+		CmtsUpdated cmtsRemoved = new CmtsUpdatedBuilder().setAddress(input.getAddress()).setPort(input.getPort()).setTransactionId(transactionId).build();
+		notificationProvider.publish(cmtsRemoved);
+	}
+
 	@Override
 	public Future<RpcResult<AddFlowOutput>> addFlow(AddFlowInput input) {
 		Match match = input.getMatch();
@@ -176,43 +189,8 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 			}
 		}
 		TransactionId transactionId = null;
-		try {
-			IPSCMTSClient requestCMTSConnection = policyServer.requestCMTSConnection(InetAddress.getByName(cmts.getAddress().getIpv4Address().getValue()));
-			transactionId = new TransactionId(new BigInteger(String.valueOf(requestCMTSConnection.getTransactionId())));
-		} catch (UnknownHostException e) {
-			e.printStackTrace();
-		}
-		if (transactionId == null) {
-			return Futures.immediateFuture(RpcResultBuilder.<AddFlowOutput> failed().build());
-		}
+		notifyConsumerOnCmtsAdd(cmts, transactionId);
 		return Futures.immediateFuture(RpcResultBuilder.success(new AddFlowOutputBuilder().setTransactionId(transactionId).build()).build());
-	}
-
-	/**
-	 * return the CmtsNode
-	 * 
-	 * @param input
-	 *            AddFlowinput
-	 * @return the cmts node
-	 */
-	@SuppressWarnings("unchecked")
-	protected CmtsNode getCmtsNode(AddFlowInput input) {
-		NodeRef nodeRef = input.getNode();
-		InstanceIdentifier<Node> instanceIdentifier = (InstanceIdentifier<Node>) nodeRef.getValue();
-		ReadOnlyTransaction rtransaction = dataBroker.newReadOnlyTransaction();
-		CheckedFuture<Optional<Node>, ReadFailedException> value = rtransaction.read(LogicalDatastoreType.CONFIGURATION, instanceIdentifier);
-		rtransaction.close();
-		Optional<Node> opt = null;
-		try {
-			opt = value.get();
-		} catch (Exception e) {
-			logger.error(e.getMessage());
-			return null;
-		}
-		Node node = opt.get();
-		CmtsCapableNode cmts = node.getAugmentation(CmtsCapableNode.class);
-		CmtsNode cmtsNode = cmts.getCmtsNode();
-		return cmtsNode;
 	}
 
 	@Override
@@ -238,6 +216,7 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 	@Override
 	public Future<RpcResult<RemoveFlowOutput>> removeFlow(RemoveFlowInput input) {
 		UdpMatchRangesRpcRemoveFlow updRange = input.getMatch().getAugmentation(UdpMatchRangesRpcRemoveFlow.class);
+		notifyConsumerOnCmtsRemove(getCmtsNode(input), null);
 		return null;
 	}
 
@@ -247,8 +226,28 @@ public class OpendaylightPacketcableProvider implements DataChangeListener,
 		UdpMatchRangesRpcUpdateFlowOriginal bar = foo.getMatch().getAugmentation(UdpMatchRangesRpcUpdateFlowOriginal.class);
 		UpdatedFlow updated = input.getUpdatedFlow();
 		UdpMatchRangesRpcUpdateFlowUpdated updatedRange = updated.getMatch().getAugmentation(UdpMatchRangesRpcUpdateFlowUpdated.class);
-
+		notifyConsumerOnCmtsUpdate(getCmtsNode(input), null);
 		return null;
+	}
+
+	@SuppressWarnings("unchecked")
+	protected CmtsNode getCmtsNode(NodeContextRef input) {
+		NodeRef nodeRef = input.getNode();
+		InstanceIdentifier<Node> instanceIdentifier = (InstanceIdentifier<Node>) nodeRef.getValue();
+		ReadOnlyTransaction rtransaction = dataBroker.newReadOnlyTransaction();
+		CheckedFuture<Optional<Node>, ReadFailedException> value = rtransaction.read(LogicalDatastoreType.CONFIGURATION, instanceIdentifier);
+		rtransaction.close();
+		Optional<Node> opt = null;
+		try {
+			opt = value.get();
+		} catch (Exception e) {
+			logger.error(e.getMessage());
+			return null;
+		}
+		Node node = opt.get();
+		CmtsCapableNode cmts = node.getAugmentation(CmtsCapableNode.class);
+		CmtsNode cmtsNode = cmts.getCmtsNode();
+		return cmtsNode;
 	}
 
 	@Override
